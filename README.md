@@ -22,8 +22,10 @@ Yes. RobloxChat is 100% Virus-Free.
 
 * Transparency: While the core repository remains private to protect proprietary encryption "salts" and infrastructure details, the application uses industry-standard encryption protocols (PBKDF2 for key derivation and AES-256-GCM for payloads).
 
-### Why is the source code private?
-To ensure the highest level of security for our users, we do not publish the raw client.py or server.py. This prevents malicious actors from analyzing specific cryptographic implementations or attempting to brute-force room identifiers.
+# 📂 Open Source
+RobloxChat is an open‑source project. The full client source code is available in this repository, so anyone can review, modify, and contribute.
+
+To keep the live infrastructure secure, the real server addresses and the server‑side code are not included in the repository. The actual configuration file (`config.py`) is replaced by `config.example.py` in the public codebase.
 
 # 🚀 How to Use
 1. Download: Download the latest .exe from the Releases tab.
