@@ -10,3 +10,5 @@ settings.json
 
 .acerum_parts/
 updater.bat
+
+config.py
