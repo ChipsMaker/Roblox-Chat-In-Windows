@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QFrame, QVBoxLayout, QLabel, QProgressBar, QHBoxLayout, QPushButton
+from PyQt5.QtWidgets import QFrame, QVBoxLayout, QLabel, QProgressBar, QHBoxLayout, QPushButton, QApplication
 from PyQt5.QtCore import Qt, QTimer
 
 class UploadTaskWidget(QFrame):
@@ -45,25 +45,53 @@ class UploadTaskWidget(QFrame):
         self.is_uploading = False
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.status_lbl.setText('Ожидание')
+        self.status_lbl.setText('Нажмите Отправить')
         self.name_lbl.setStyleSheet('color:#E2D189; font-weight:bold; font-size:11px;')
 
     def set_uploading(self):
         self.is_uploading = True
-        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
         self.status_lbl.setText('Загрузка...')
         self.name_lbl.setStyleSheet('color:#E2D189; font-weight:bold; font-size:11px;')
+        self.set_progress(0, None)
 
     def set_finished(self):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self.status_lbl.setText('Загружено')
         self.name_lbl.setStyleSheet('color:#4CAF50; font-weight:bold; font-size:11px;')
+        self.progress_bar.update()
+        self.status_lbl.update()
+        self.name_lbl.update()
 
     def set_error(self, msg):
         self.progress_bar.setVisible(False)
         self.status_lbl.setText(msg)
         self.name_lbl.setStyleSheet('color:#ff5c5c; font-weight:bold; font-size:11px;')
+        self.progress_bar.update()
+        self.status_lbl.update()
+        self.name_lbl.update()
+        self.update()
+
+    def set_progress(self, percent, speed=None):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(percent)
+        if speed is not None:
+            self.status_lbl.setText(f'Загрузка: {percent}% — {self._format_speed(speed)}')
+        else:
+            self.status_lbl.setText(f'Загрузка: {percent}%')
+        self.progress_bar.update()
+        self.status_lbl.update()
+        QApplication.processEvents()
+
+    @staticmethod
+    def _format_speed(bytes_per_sec):
+        for unit in ['B/s', 'KB/s', 'MB/s', 'GB/s']:
+            if bytes_per_sec < 1024:
+                return f'{bytes_per_sec:.1f} {unit}'
+            bytes_per_sec /= 1024
+        return f'{bytes_per_sec:.1f} TB/s'
 
     def handle_cancel(self):
         if self.is_uploading:

@@ -1,9 +1,9 @@
 import secrets
 import base64
 import hashlib
-SERVERS_DATA = { ... }
+SERVERS_DATA = {...}
 SERVER_URLS = list(SERVERS_DATA.keys())
-VERSION = '0.7.1'
+VERSION = '0.7.2'
 GITHUB_REPO = 'ChipsMaker/Roblox-Chat-In-Windows'
 
 def generate_room_key() -> str:

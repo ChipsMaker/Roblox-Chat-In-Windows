@@ -2,6 +2,11 @@ import os
 import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+try:
+    from requests_toolbelt import MultipartEncoder, MultipartEncoderMonitor
+    HAS_PROGRESS = True
+except ImportError:
+    HAS_PROGRESS = False
 
 class AcerumSmartUploader:
 
@@ -20,8 +25,15 @@ class AcerumSmartUploader:
             payload = nonce + self.crypto.aes.encrypt(nonce, data, None)
         else:
             payload = data
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        files = {'file': (safe_filename, payload, 'application/octet-stream')}
-        r = requests.post(f'{self.server_url}/acerum/upload', files=files, headers=headers, timeout=30, verify=False)
+        if not progress_callback or not HAS_PROGRESS:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            files = {'file': (safe_filename, payload, 'application/octet-stream')}
+            r = requests.post(f'{self.server_url}/acerum/upload', files=files, headers=headers, timeout=30, verify=False)
+            r.raise_for_status()
+            return r.json()
+        encoder = MultipartEncoder(fields={'file': (safe_filename, payload, 'application/octet-stream')})
+        monitor = MultipartEncoderMonitor(encoder, callback=progress_callback)
+        headers = {'User-Agent': 'Mozilla/5.0', 'Content-Type': monitor.content_type}
+        r = requests.post(f'{self.server_url}/acerum/upload', data=monitor, headers=headers, timeout=30, verify=False)
         r.raise_for_status()
         return r.json()

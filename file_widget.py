@@ -15,6 +15,8 @@ class FileWidget(QFrame):
 
     def __init__(self, username, file_name, file_id, text, crypto, active_server, parent=None):
         super().__init__(parent)
+        self.setMaximumWidth(320)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         self.username = username
         self.file_name = file_name
         self.file_id = file_id
@@ -22,67 +24,81 @@ class FileWidget(QFrame):
         self.crypto = crypto
         self.active_server = active_server
         self.downloader = None
-        self.setStyleSheet('background: #2a2a2a; border-radius: 12px; margin: 5px; padding: 8px;')
+        self.setStyleSheet('\n            FileWidget {\n                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,\n                                            stop:0 #2c2c2c, stop:1 #1e1e1e);\n                border: 1px solid #E2D189;\n                border-radius: 10px;\n                padding: 8px;\n            }\n            QToolTip {\n                background-color: #333;\n                color: #E2D189;\n                border: 1px solid #E2D189;\n                padding: 4px;\n                border-radius: 4px;\n            }\n        ')
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(6)
-        user_lbl = QLabel(f'<b>{self.username}</b>')
-        user_lbl.setStyleSheet('color: #E2D189; font-size: 12px;')
-        layout.addWidget(user_lbl)
-        if self.text:
-            text_lbl = QLabel(self.text)
-            text_lbl.setWordWrap(True)
-            text_lbl.setStyleSheet('color: #ccc; font-size: 11px;')
-            layout.addWidget(text_lbl)
-        file_frame = QFrame()
-        file_frame.setStyleSheet('background: #1e1e1e; border-radius: 8px;')
-        file_layout = QHBoxLayout(file_frame)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(10)
         self.icon_lbl = QLabel()
         self.icon_lbl.setFixedSize(48, 48)
         self.icon_lbl.setAlignment(Qt.AlignCenter)
-        self.icon_lbl.setStyleSheet('background: #333; border-radius: 6px; font-size: 32px;')
+        self.icon_lbl.setStyleSheet('\n            background: #3a3a3a;\n            border-radius: 10px;\n            font-size: 30px;\n        ')
         ext = self.file_name.split('.')[-1].lower()
-        if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp']:
-            self.icon_lbl.setText('🖼️')
-        elif ext in ['mp4', 'mkv', 'avi']:
-            self.icon_lbl.setText('🎬')
-        elif ext in ['mp3', 'wav', 'ogg']:
-            self.icon_lbl.setText('🎵')
-        elif ext in ['pdf']:
-            self.icon_lbl.setText('📑')
-        else:
-            self.icon_lbl.setText('📎')
-        file_layout.addWidget(self.icon_lbl)
+        icon_map = {'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'bmp': '🖼️', 'mp4': '🎬', 'mkv': '🎬', 'avi': '🎬', 'mp3': '🎵', 'wav': '🎵', 'ogg': '🎵', 'pdf': '📑'}
+        self.icon_lbl.setText(icon_map.get(ext, '📎'))
+        top_layout.addWidget(self.icon_lbl)
         info_layout = QVBoxLayout()
-        name_lbl = QLabel(self.file_name)
-        name_lbl.setStyleSheet('font-weight: bold; color: white;')
+        info_layout.setSpacing(3)
+        self.file_name_lbl = QLabel(self.file_name)
+        self.file_name_lbl.setStyleSheet('color: white; font-weight: bold; font-size: 13px; background: transparent; border: none;')
+        self.file_name_lbl.setWordWrap(False)
+        fm = QFontMetrics(self.file_name_lbl.font())
+        elided = fm.elidedText(self.file_name, Qt.ElideRight, 190)
+        self.file_name_lbl.setText(elided)
+        info_layout.addWidget(self.file_name_lbl)
         self.size_lbl = QLabel('Размер: неизвестен')
-        self.size_lbl.setStyleSheet('font-size: 10px; color: #aaa;')
+        self.size_lbl.setStyleSheet('color: #aaa; font-size: 11px; background: transparent; border: none;')
+        info_layout.addWidget(self.size_lbl)
+        sender_lbl = QLabel(f'📤 {self.username}')
+        sender_lbl.setStyleSheet('color: #E2D189; font-size: 11px; background: transparent; border: none;')
+        info_layout.addWidget(sender_lbl)
+        if self.text:
+            text_lbl = QLabel(self.text)
+            text_lbl.setWordWrap(True)
+            text_lbl.setStyleSheet('color: #ccc; font-size: 11px; background: transparent; border: none; padding-top: 2px;')
+            info_layout.addWidget(text_lbl)
+        top_layout.addLayout(info_layout, 1)
+        self.action_btn = QPushButton()
+        self.action_btn.setCursor(Qt.PointingHandCursor)
+        self.action_btn.setFixedSize(40, 40)
+        self.action_btn.setStyleSheet('\n            QPushButton {\n                background: #E2D189;\n                color: black;\n                border-radius: 8px;\n                font-size: 22px;\n                border: none;\n            }\n            QPushButton:hover {\n                background: #f5e6a8;\n            }\n            QPushButton:disabled {\n                background: #666;\n                color: #aaa;\n            }\n        ')
+        self.action_btn.clicked.connect(self.on_action_clicked)
+        top_layout.addWidget(self.action_btn)
+        main_layout.addLayout(top_layout)
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setFixedHeight(4)
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setStyleSheet('QProgressBar::chunk { background: #E2D189; }')
-        info_layout.addWidget(name_lbl)
-        info_layout.addWidget(self.size_lbl)
-        info_layout.addWidget(self.progress_bar)
-        file_layout.addLayout(info_layout, 1)
-        btn_layout = QVBoxLayout()
-        self.open_btn = QPushButton('Открыть')
-        self.open_btn.setCursor(Qt.PointingHandCursor)
-        self.open_btn.setStyleSheet('background: #4a4a4a; border-radius: 5px; padding: 4px;')
-        self.open_btn.clicked.connect(self.open_file)
-        self.download_btn = QPushButton('Скачать (Acerum)')
-        self.download_btn.setCursor(Qt.PointingHandCursor)
-        self.download_btn.setStyleSheet('background: #E2D189; color: black; font-weight: bold; border-radius: 5px; padding: 4px;')
-        self.download_btn.clicked.connect(self.start_download)
-        btn_layout.addWidget(self.open_btn)
-        btn_layout.addWidget(self.download_btn)
-        file_layout.addLayout(btn_layout)
-        layout.addWidget(file_frame)
+        self.progress_bar.setStyleSheet('\n            QProgressBar {\n                background: rgba(255,255,255,10);\n                border-radius: 2px;\n                border: none;\n            }\n            QProgressBar::chunk {\n                background: #E2D189;\n                border-radius: 2px;\n            }\n        ')
+        main_layout.addWidget(self.progress_bar)
+        self.update_action_button()
         self.check_local_file()
+
+    def update_action_button(self, state=None):
+        if state == 'downloading':
+            self.action_btn.setText('⏳')
+            self.action_btn.setEnabled(False)
+            self.action_btn.setToolTip('Идёт загрузка...')
+        elif state == 'ready':
+            self.action_btn.setText('📂')
+            self.action_btn.setEnabled(True)
+            self.action_btn.setToolTip('Открыть файл')
+        else:
+            self.action_btn.setText('⬇')
+            self.action_btn.setEnabled(True)
+            self.action_btn.setToolTip('Скачать через Acerum')
+
+    def on_action_clicked(self):
+        download_dir = self.get_download_dir()
+        local_path = os.path.join(download_dir, self.file_name)
+        if os.path.exists(local_path):
+            self.open_file()
+        else:
+            self.start_download()
 
     def get_download_dir(self):
         parent = self.window()
@@ -97,11 +113,10 @@ class FileWidget(QFrame):
         local_path = os.path.join(download_dir, self.file_name)
         if os.path.exists(local_path):
             self.size_lbl.setText(f'Уже загружен: {human_readable_size(os.path.getsize(local_path))}')
-            self.download_btn.setText('Загружен')
-            self.download_btn.setEnabled(False)
-            self.download_btn.setStyleSheet('background: #666; color: #aaa;')
+            self.update_action_button('ready')
         else:
-            self.download_btn.setEnabled(True)
+            self.size_lbl.setText('Размер: неизвестен')
+            self.update_action_button(None)
 
     def open_file(self):
         download_dir = self.get_download_dir()
@@ -118,18 +133,23 @@ class FileWidget(QFrame):
                 viewer.setPixmap(pixmap.scaled(800, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation))
                 viewer.setWindowTitle(self.file_name)
                 viewer.show()
-            else:
-                os.startfile(local_path)
-        else:
+                return
+        try:
             os.startfile(local_path)
+        except OSError as e:
+            if e.winerror == 1223:
+                pass
+            else:
+                QMessageBox.warning(self, 'Ошибка открытия', f'Не удалось открыть файл:\n{str(e)}')
+        except Exception as e:
+            QMessageBox.warning(self, 'Ошибка открытия', f'Не удалось открыть файл:\n{str(e)}')
 
     def start_download(self):
         download_dir = self.get_download_dir()
         output_path = os.path.join(download_dir, self.file_name)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.download_btn.setEnabled(False)
-        self.download_btn.setText('Загрузка...')
+        self.update_action_button('downloading')
         url = f'{self.active_server}/acerum/download/{self.file_id}'
 
         def callback(done, total, speed, status=''):
@@ -140,9 +160,8 @@ class FileWidget(QFrame):
                     self.progress_bar.setValue(percent)
                 if status == 'complete':
                     self.progress_bar.setVisible(False)
-                    self.download_btn.setText('Загружен')
-                    self.download_btn.setEnabled(False)
                     self.size_lbl.setText(f'Загружен: {human_readable_size(total)}')
+                    self.update_action_button('ready')
                     parent = self.window()
                     if hasattr(parent, 'show_toast'):
                         parent.show_toast(f'Файл сохранён: {self.file_name}')

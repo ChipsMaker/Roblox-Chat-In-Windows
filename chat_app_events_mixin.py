@@ -1,5 +1,5 @@
-import json, os, threading, requests
-from PyQt5.QtCore import QTimer
+import json, os, threading, requests, time
+from PyQt5.QtCore import QTimer, pyqtSlot, Q_ARG, Qt, QMetaObject
 from .uploader import AcerumSmartUploader
 from .file_widget import FileWidget
 from .task_widget import UploadTaskWidget
@@ -48,8 +48,6 @@ class ChatAppEventsMixin:
 
     def send_msg(self):
         text = self.input_field.text().strip()
-        if not text and (not self.pending_tasks):
-            return
         my_name = self.settings.get('name', 'Я')
         tasks_to_process = [t for t in self.pending_tasks if not t.cancelled and (not t.is_uploading)]
         self.pending_tasks.clear()
@@ -59,44 +57,64 @@ class ChatAppEventsMixin:
             self.input_field.clear()
             QTimer.singleShot(100, self.restore_focus)
             return
-        total_files = len(tasks_to_process)
-        state = {'done': 0, 'text_sent': False}
+        if tasks_to_process:
+            self.input_field.clear()
+            total_files = len(tasks_to_process)
+            state = {'done': 0, 'text_sent': False}
 
-        def on_file_done():
-            state['done'] += 1
-            if state['done'] >= total_files:
-                if text and (not state['text_sent']):
-                    state['text_sent'] = True
-                    self.add_chat_message(my_name, text, self.user_uuid)
-                    threading.Thread(target=self.network_send_text, args=(text,), daemon=True).start()
-                self.input_field.clear()
-                QTimer.singleShot(100, self.restore_focus)
-        for task in tasks_to_process:
-            task.set_uploading()
-            threading.Thread(target=self._upload_file, args=(task, on_file_done), daemon=True).start()
+            def on_file_done():
+                state['done'] += 1
+                if state['done'] >= total_files:
+                    if text and (not state['text_sent']):
+                        state['text_sent'] = True
+                        self.add_chat_message(my_name, text, self.user_uuid)
+                        threading.Thread(target=self.network_send_text, args=(text,), daemon=True).start()
+                    QTimer.singleShot(100, self.restore_focus)
+            for task in tasks_to_process:
+                task.set_uploading()
+                threading.Thread(target=self._upload_file, args=(task, on_file_done), daemon=True).start()
+        else:
+            QTimer.singleShot(100, self.restore_focus)
+
+    @pyqtSlot(object, object)
+    def _handle_upload_success(self, task, result):
+        self._on_upload_success(task, result)
+
+    @pyqtSlot(object, str)
+    def _handle_upload_error(self, task, error_str):
+        self._on_upload_error(task, error_str)
+
+    @pyqtSlot(object, int, float)
+    def _handle_upload_progress(self, task, percent, speed):
+        task.set_progress(percent, speed)
 
     def _upload_file(self, task, on_complete=None):
+        import time
         try:
             uploader = AcerumSmartUploader(self.active_server, task.file_path, self.crypto)
-            result = uploader.upload()
+            start_time = time.time()
+
+            def progress_callback(monitor):
+                percent = int(monitor.bytes_read / monitor.len * 100)
+                elapsed = time.time() - start_time
+                speed = monitor.bytes_read / elapsed if elapsed > 0 else 0
+                QMetaObject.invokeMethod(self, '_handle_upload_progress', Qt.QueuedConnection, Q_ARG(object, task), Q_ARG(int, percent), Q_ARG(float, speed))
+            result = uploader.upload(progress_callback=progress_callback)
+            QMetaObject.invokeMethod(self, '_handle_upload_success', Qt.QueuedConnection, Q_ARG(object, task), Q_ARG(object, result))
         except requests.exceptions.Timeout:
-            if not task.cancelled:
-                QTimer.singleShot(0, lambda: self._on_upload_error(task, 'Таймаут загрузки'))
+            QMetaObject.invokeMethod(self, '_handle_upload_error', Qt.QueuedConnection, Q_ARG(object, task), Q_ARG(str, 'Таймаут загрузки'))
         except requests.exceptions.ConnectionError:
-            if not task.cancelled:
-                QTimer.singleShot(0, lambda: self._on_upload_error(task, 'Ошибка соединения'))
+            QMetaObject.invokeMethod(self, '_handle_upload_error', Qt.QueuedConnection, Q_ARG(object, task), Q_ARG(str, 'Ошибка соединения'))
         except Exception as e:
-            if not task.cancelled:
-                QTimer.singleShot(0, lambda: self._on_upload_error(task, str(e)))
-        else:
-            if not task.cancelled:
-                QTimer.singleShot(0, lambda: self._on_upload_success(task, result))
+            QMetaObject.invokeMethod(self, '_handle_upload_error', Qt.QueuedConnection, Q_ARG(object, task), Q_ARG(str, str(e)))
         finally:
             if on_complete:
                 QTimer.singleShot(0, on_complete)
 
     def _on_upload_success(self, task, result):
         task.set_finished()
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
         QTimer.singleShot(500, task.deleteLater)
         self.network_send_file(result, '')
         filename = os.path.basename(task.file_path)
@@ -113,6 +131,8 @@ class ChatAppEventsMixin:
         else:
             msg = error_str
         task.set_error(msg)
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
 
     def network_send_text(self, text):
         try:
