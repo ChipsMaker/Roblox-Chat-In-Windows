@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -32,7 +33,20 @@ class AcerumSmartUploader:
             r.raise_for_status()
             return r.json()
         encoder = MultipartEncoder(fields={'file': (safe_filename, payload, 'application/octet-stream')})
-        monitor = MultipartEncoderMonitor(encoder, callback=progress_callback)
+
+        class AdaptiveMonitor(MultipartEncoderMonitor):
+
+            def __init__(self, encoder, callback):
+                super().__init__(encoder, callback)
+                self.last_bytes = 0
+                self.last_time = time.time()
+                self.chunk_size = 8192
+                self.speed_history = []
+
+            def read(self, size=None):
+                data = super().read(size)
+                return data
+        monitor = AdaptiveMonitor(encoder, callback=progress_callback)
         headers = {'User-Agent': 'Mozilla/5.0', 'Content-Type': monitor.content_type}
         r = requests.post(f'{self.server_url}/acerum/upload', data=monitor, headers=headers, timeout=30, verify=False)
         r.raise_for_status()

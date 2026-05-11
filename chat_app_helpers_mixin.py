@@ -28,6 +28,8 @@ class ChatAppHelpersMixin:
         lbl = QLabel(text)
         lbl.setStyleSheet(f'color: {color}; font-style: italic; font-size: 12px;')
         lbl.setWordWrap(True)
+        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lbl.setCursor(Qt.IBeamCursor)
         self.chat_layout.addWidget(lbl)
         self.scroll_chat_to_bottom()
 
@@ -36,5 +38,7 @@ class ChatAppHelpersMixin:
         lbl.setStyleSheet('color: white; font-size: 13px;')
         lbl.setWordWrap(True)
         lbl.setTextFormat(Qt.RichText)
+        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lbl.setCursor(Qt.IBeamCursor)
         self.chat_layout.addWidget(lbl)
         self.scroll_chat_to_bottom()

@@ -1,6 +1,4 @@
-import sys
-import os
-import ctypes
+import sys, os, ctypes, time, requests, threading
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -23,7 +21,7 @@ class ChatAppUIMixin:
         header = QHBoxLayout()
         self.info_lbl = QLabel(f'v{self.VERSION}')
         self.info_lbl.setStyleSheet('color: rgba(255,255,255,80); font-size: 10px;')
-        self.admin_btn = QPushButton('🛡️')
+        self.admin_btn = QPushButton('👥')
         self.admin_btn.setFixedSize(22, 22)
         self.admin_btn.setStyleSheet('color: rgba(255,255,255,150); background: transparent; border: none; font-size: 14px;')
         self.admin_btn.clicked.connect(self.show_admin_menu)
@@ -148,8 +146,8 @@ class ChatAppUIMixin:
     def select_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, 'Выберите файл для отправки')
         if file_path:
-            if os.path.getsize(file_path) > 400 * 1024 * 1024:
-                QMessageBox.warning(self, 'Acerum', 'Файл слишком большой (макс. 400 МБ)')
+            if os.path.getsize(file_path) > 1024 * 1024 * 1024:
+                QMessageBox.warning(self, 'Acerum', 'Файл слишком большой (макс. 1 ГБ).')
                 return
             self.add_pending_file_task(file_path)
 
@@ -177,16 +175,104 @@ class ChatAppUIMixin:
         if not self.room_code:
             QMessageBox.information(self, 'Инфо', 'Вы не в комнате')
             return
+        now = time.time()
+        need_fetch = False
+        if self.cached_room_users is None:
+            try:
+                resp = requests.get(f'{self.active_server}/room_users', params={'room_code': self.room_code}, timeout=2).json()
+                users = resp.get('users', [])
+                creator_uuid = resp.get('creator_uuid')
+                self.cached_room_users = (users, creator_uuid)
+                self.last_room_users_fetch = now
+            except Exception as e:
+                self._open_users_menu([], None, error='Не удалось загрузить список')
+                return
+        elif now - self.last_room_users_fetch >= 5 and (not self.is_fetching_room_users):
+            need_fetch = True
+        if need_fetch:
+            self.is_fetching_room_users = True
+
+            def fetch_thread():
+                try:
+                    resp = requests.get(f'{self.active_server}/room_users', params={'room_code': self.room_code}, timeout=3).json()
+                    users = resp.get('users', [])
+                    creator_uuid = resp.get('creator_uuid')
+                    self.cached_room_users = (users, creator_uuid)
+                    self.last_room_users_fetch = time.time()
+                except Exception as e:
+                    print(f'Фоновое обновление участников не удалось: {e}')
+                finally:
+                    self.is_fetching_room_users = False
+            threading.Thread(target=fetch_thread, daemon=True).start()
+        users, creator_uuid = self.cached_room_users
+        self._open_users_menu(users, creator_uuid)
+
+    def _open_users_menu(self, users, creator_uuid, error=None):
         menu = QMenu(self)
         menu.setStyleSheet('background: #111; color: white; border: 1px solid #E2D189;')
-        menu.addAction(f'ID комнаты: {self.room_code[:10]}...').setEnabled(False)
+        if error:
+            title = menu.addAction(error)
+            title.setEnabled(False)
+        else:
+            title = menu.addAction(f'👥 Участники ({len(users)})')
+            title.setEnabled(False)
         menu.addSeparator()
-        if hasattr(self, 'current_dm_target') and self.current_dm_target:
-            reset_dm = menu.addAction('❌ Выйти из режима ЛС')
-            reset_dm.triggered.connect(self.reset_dm_mode)
-        exit_act = menu.addAction('🚪 Покинуть чат')
-        exit_act.triggered.connect(self.main_menu)
+        for u in users:
+            name = u['name']
+            uid = u['uuid']
+            if creator_uuid and self.user_uuid == creator_uuid and (uid != self.user_uuid):
+                submenu = QMenu(f'  {name}', menu)
+                submenu.setStyleSheet('background: #222; color: white;')
+                kick_action = submenu.addAction('🚫 Кикнуть')
+                kick_action.triggered.connect(lambda checked, u=uid: self.admin_action(u, 'kick'))
+                ban_action = submenu.addAction('⛔ Забанить')
+                ban_action.triggered.connect(lambda checked, u=uid: self.admin_action(u, 'ban'))
+                menu.addMenu(submenu)
+            else:
+                action = menu.addAction(f'  {name}')
+                action.setEnabled(False)
+        menu.addSeparator()
+        if creator_uuid == self.user_uuid:
+            id_action = menu.addAction(f'🔑 ID комнаты: {self.room_code[:10]}...')
+            id_action.setEnabled(False)
+        exit_action = menu.addAction('🚪 Покинуть чат')
+        exit_action.triggered.connect(self.leave_room)
         menu.exec_(QCursor.pos())
+
+    def admin_action(self, target_uuid, action):
+        try:
+            requests.post(f'{self.active_server}/admin_action', params={'room_code': self.room_code, 'target_uuid': target_uuid, 'action': action}, timeout=3)
+            if action == 'kick':
+                msg = 'Пользователь кикнут из комнаты.'
+            elif action == 'ban':
+                msg = 'Пользователь забанен в комнате.'
+            else:
+                msg = f"Действие '{action}' выполнено."
+            QMessageBox.information(self, 'Администратор', msg)
+            self.cached_room_users = None
+        except Exception as e:
+            QMessageBox.warning(self, 'Ошибка', f'Не удалось выполнить действие: {e}')
+
+    def leave_room(self):
+        try:
+            requests.post(f'{self.active_server}/leave_room', params={'room_code': self.room_code, 'user_uuid': self.user_uuid}, timeout=3)
+        except Exception as e:
+            print(f'Ошибка при выходе из комнаты: {e}')
+        self.room_code = None
+        self.room_key = None
+        self.is_in_chat = False
+        self.crypto = None
+        self.cached_room_users = None
+        self.last_room_users_fetch = 0
+        self.input_field.clear()
+        self.input_field.setPlaceholderText('Нажмите для ввода...')
+        while self.chat_layout.count():
+            child = self.chat_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        self.pending_tasks.clear()
+        self.restore_focus()
+        self.main_menu()
 
     def reset_dm_mode(self):
         self.current_dm_target = None
@@ -225,6 +311,9 @@ class ChatAppUIMixin:
                 self.previous_hwnd = None
 
     def mousePressEvent(self, event):
+        child = self.childAt(event.pos())
+        if child is self.chat_widget or (child is not None and self.chat_widget.isAncestorOf(child)):
+            return
         self.oldPos = event.globalPos()
 
     def mouseMoveEvent(self, event):

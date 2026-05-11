@@ -6,7 +6,7 @@ import requests
 from PyQt5.QtWidgets import QWidget, QApplication, QSystemTrayIcon, QMenu, QStyle
 from PyQt5.QtCore import QTimer, pyqtSignal, Qt
 from .config import SERVERS_DATA, SERVER_URLS, VERSION, GITHUB_REPO
-from .network_worker import NetworkWorker
+from .network_worker import SyncPoller
 from .download_window import DownloadWindow
 import src.resources_rc
 from .chat_app_ui_mixin import ChatAppUIMixin
@@ -27,6 +27,9 @@ class ChatApp(QWidget, ChatAppRoomMixin, ChatAppUIMixin, ChatAppEventsMixin, Cha
         super().__init__()
         self.setAcceptDrops(True)
         self.attached_files = []
+        self.cached_room_users = None
+        self.last_room_users_fetch = 0
+        self.is_fetching_room_users = False
         self.http_session = requests.Session()
         self.server_pings = {url: '---' for url in SERVER_URLS}
         self.server_status = {url: False for url in SERVER_URLS}
@@ -52,12 +55,16 @@ class ChatApp(QWidget, ChatAppRoomMixin, ChatAppUIMixin, ChatAppEventsMixin, Cha
         self.pending_tasks = []
         self.attached_files = []
         self.init_ui()
-        self.worker = NetworkWorker(self)
-        self.worker.new_messages.connect(self.on_new_messages)
-        self.worker.join_request.connect(self.on_join_request)
-        self.worker.access_approved.connect(self.on_access_approved)
-        self.worker.typing_updated.connect(self.update_typing_label)
-        self.worker.start()
+        self.poller = SyncPoller(self)
+        self.poller.new_messages.connect(self.on_new_messages)
+        self.poller.join_request.connect(self.on_join_request)
+        self.poller.access_approved.connect(self.on_access_approved)
+        self.poller.typing_updated.connect(self.update_typing_label)
+        self.poller.start()
+        self.is_creator = False
+        self._seen_join_requests = set()
+        self._pending_join_requests = []
+        self._join_dialog_active = False
         self.ping_updated_signal.connect(self.actual_ui_ping_update)
         self.find_best_server()
         threading.Thread(target=self.server_monitor_loop, daemon=True).start()
@@ -153,8 +160,8 @@ class ChatApp(QWidget, ChatAppRoomMixin, ChatAppUIMixin, ChatAppEventsMixin, Cha
         if hasattr(self, 'tray_icon') and self.tray_icon:
             self.tray_icon.hide()
             self.tray_icon = None
-        if hasattr(self, 'worker'):
-            self.worker.running = False
-            self.worker.quit()
-            self.worker.wait(2000)
+        if hasattr(self, 'poller'):
+            self.poller.running = False
+            self.poller.quit()
+            self.poller.wait(2000)
         QApplication.quit()

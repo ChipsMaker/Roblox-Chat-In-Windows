@@ -1,4 +1,4 @@
-import json, os, threading, requests, time
+import json, os, threading, requests, time, sip
 from PyQt5.QtCore import QTimer, pyqtSlot, Q_ARG, Qt, QMetaObject
 from .uploader import AcerumSmartUploader
 from .file_widget import FileWidget
@@ -21,15 +21,18 @@ class ChatAppEventsMixin:
                         info = json.loads(file_data)
                         file_id = m.get('file_id')
                         if file_id:
-                            widget = FileWidget(user_name, info.get('fn', 'file'), file_id, '', self.crypto, self.active_server)
+                            file_url = m.get('file_server_url', self.active_server)
+                            if file_url not in self.SERVER_URLS:
+                                file_url = self.active_server
+                            widget = FileWidget(user_name, info.get('fn', 'file'), file_id, '', self.crypto, file_url)
                             self.chat_layout.addWidget(widget)
                             self.scroll_chat_to_bottom()
                         else:
-                            self.add_system_message(f'📎 {user_name} отправил файл без ID: {info.get('fn', 'file')}', '#E2D189')
+                            self.add_system_message(f'🔗 {user_name} отправил файл без ID: {info.get('fn', 'file')}', '#E2D189')
                     else:
-                        self.add_system_message(f'📎 {user_name} отправил зашифрованный файл', '#E2D189')
-                except:
-                    pass
+                        self.add_system_message(f'🔗 {user_name} отправил зашифрованный файл', '#E2D189')
+                except Exception as e:
+                    print(f'Ошибка при обработке файла: {e}')
             else:
                 text = self.crypto.dec(m.get('data'))
                 if text:
@@ -55,6 +58,7 @@ class ChatAppEventsMixin:
             self.add_chat_message(my_name, text, self.user_uuid)
             threading.Thread(target=self.network_send_text, args=(text,), daemon=True).start()
             self.input_field.clear()
+            self.last_sync = 0.0
             QTimer.singleShot(100, self.restore_focus)
             return
         if tasks_to_process:
@@ -69,6 +73,7 @@ class ChatAppEventsMixin:
                         state['text_sent'] = True
                         self.add_chat_message(my_name, text, self.user_uuid)
                         threading.Thread(target=self.network_send_text, args=(text,), daemon=True).start()
+                        self.last_sync = 0.0
                     QTimer.singleShot(100, self.restore_focus)
             for task in tasks_to_process:
                 task.set_uploading()
@@ -78,15 +83,18 @@ class ChatAppEventsMixin:
 
     @pyqtSlot(object, object)
     def _handle_upload_success(self, task, result):
-        self._on_upload_success(task, result)
+        if not sip.isdeleted(task):
+            self._on_upload_success(task, result)
 
     @pyqtSlot(object, str)
     def _handle_upload_error(self, task, error_str):
-        self._on_upload_error(task, error_str)
+        if not sip.isdeleted(task):
+            self._on_upload_error(task, error_str)
 
     @pyqtSlot(object, int, float)
     def _handle_upload_progress(self, task, percent, speed):
-        task.set_progress(percent, speed)
+        if not sip.isdeleted(task):
+            task.set_progress(percent, speed)
 
     def _upload_file(self, task, on_complete=None):
         import time
@@ -113,13 +121,14 @@ class ChatAppEventsMixin:
 
     def _on_upload_success(self, task, result):
         task.set_finished()
-        from PyQt5.QtWidgets import QApplication
-        QApplication.processEvents()
-        QTimer.singleShot(500, task.deleteLater)
-        self.network_send_file(result, '')
+        if not sip.isdeleted(task):
+            QTimer.singleShot(500, task.deleteLater)
         filename = os.path.basename(task.file_path)
+        self.network_send_file(result, filename)
+        self.last_sync = 0.0
         file_id = result.get('file_id') if isinstance(result, dict) else result
-        widget = FileWidget(self.settings['name'], filename, file_id, '', self.crypto, self.active_server)
+        server_url = result.get('server_url', self.active_server)
+        widget = FileWidget(self.settings['name'], filename, file_id, '', self.crypto, server_url)
         self.chat_layout.addWidget(widget)
         self.scroll_chat_to_bottom()
 
@@ -142,11 +151,13 @@ class ChatAppEventsMixin:
         except Exception as e:
             print(f'Ошибка отправки текста: {e}')
 
-    def network_send_file(self, file_info, comment=''):
+    def network_send_file(self, file_info, filename, comment=''):
         try:
-            enc_comment = self.crypto.enc(comment) if comment else ''
+            file_meta = json.dumps({'fn': filename})
+            enc_meta = self.crypto.enc(file_meta)
             enc_name = self.crypto.enc(self.settings.get('name', 'User'))
             fid = file_info.get('file_id') if isinstance(file_info, dict) else file_info
-            requests.post(f'{self.active_server}/send', json={'room_code': self.room_code, 'user_uuid': self.user_uuid, 'username': enc_name, 'encrypted_payload': enc_comment, 'is_file': True, 'file_id': fid}, timeout=6)
+            server_url = file_info.get('server_url', self.active_server)
+            requests.post(f'{self.active_server}/send', json={'room_code': self.room_code, 'user_uuid': self.user_uuid, 'username': enc_name, 'encrypted_payload': enc_meta, 'is_file': True, 'file_id': fid, 'file_server_url': server_url}, timeout=6)
         except Exception as e:
             print(f'Ошибка отправки файла в чат: {e}')

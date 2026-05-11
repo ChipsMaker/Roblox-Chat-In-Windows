@@ -1,5 +1,6 @@
 import os, json, time, threading, sys, requests, hmac, hashlib, winreg
 from PyQt5.QtWidgets import *
+from PyQt5.QtCore import QStandardPaths
 from .config import SERVERS_DATA, SERVER_URLS, VERSION
 from pathlib import Path
 
@@ -43,13 +44,10 @@ class ChatAppSettingsMixin:
         return (False, days_left)
 
     def change_save_path(self):
-        path = QFileDialog.getExistingDirectory(self, 'Выберите папку для Acerum-файлов')
+        path = QFileDialog.getExistingDirectory(self, 'Выберите папку для скачивания')
         if path:
             self.settings['download_path'] = path
             self.path_display.setText(path)
-        else:
-            self.settings['download_path'] = None
-            self.path_display.setText('Спрашивать при скачивании')
 
     def _get_or_create_signing_key(self):
         reg_path = 'Software\\Red65\\Chat'
@@ -170,10 +168,12 @@ class ChatAppSettingsMixin:
         slash_cb = QCheckBox('Активация через slash (/)')
         slash_cb.setChecked(self.settings.get('slash_activation', True))
         d_layout.addWidget(slash_cb)
-        d_layout.addWidget(QLabel('<b>📁 Хранилище Acerum:</b>'))
+        d_layout.addWidget(QLabel('<b>📁 Папка для скачивания:</b>'))
         path_box = QHBoxLayout()
         current_p = self.settings.get('download_path')
-        self.path_display = QLabel(current_p if current_p else 'Спрашивать при скачивании')
+        if not current_p:
+            current_p = QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
+        self.path_display = QLabel(current_p)
         self.path_display.setStyleSheet('font-size: 10px; color: #555;')
         btn_sel = QPushButton('Изменить')
         btn_sel.setFixedWidth(70)
