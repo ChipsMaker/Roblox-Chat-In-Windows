@@ -3,7 +3,7 @@ import os
 import uuid
 import threading
 import requests
-from PyQt5.QtWidgets import QWidget, QApplication, QSystemTrayIcon, QMenu, QStyle
+from PyQt5.QtWidgets import QWidget, QApplication, QSystemTrayIcon, QMenu, QMessageBox, QStile
 from PyQt5.QtCore import QTimer, pyqtSignal, Qt
 from .config import SERVERS_DATA, SERVER_URLS, VERSION, GITHUB_REPO
 from .network_worker import SyncPoller
