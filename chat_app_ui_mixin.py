@@ -104,8 +104,7 @@ class ChatAppUIMixin:
                 keyboard.add_hotkey(key, global_hotkey_handler, suppress=False)
             except:
                 continue
-        QTimer.singleShot(200, self.start_flow)
-        QTimer.singleShot(1000, self.check_updates)
+        self.check_updates()
 
     def resizeEvent(self, event):
         QWidget.resizeEvent(self, event)
@@ -218,8 +217,12 @@ class ChatAppUIMixin:
             title.setEnabled(False)
         menu.addSeparator()
         for u in users:
+            if u['name'].lower() == 'host':
+                continue
             name = u['name']
             uid = u['uuid']
+            action = menu.addAction(f'  {name}')
+            action.triggered.connect(lambda checked, n=name: self.handle_nick_click(n))
             if creator_uuid and self.user_uuid == creator_uuid and (uid != self.user_uuid):
                 submenu = QMenu(f'  {name}', menu)
                 submenu.setStyleSheet('background: #222; color: white;')
@@ -317,6 +320,7 @@ class ChatAppUIMixin:
         self.oldPos = event.globalPos()
 
     def mouseMoveEvent(self, event):
-        delta = QPoint(event.globalPos() - self.oldPos)
-        self.move(self.x() + delta.x(), self.y() + delta.y())
-        self.oldPos = event.globalPos()
+        if self.oldPos is not None:
+            delta = QPoint(event.globalPos() - self.oldPos)
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self.oldPos = event.globalPos()

@@ -2,6 +2,7 @@ import os
 import time
 import requests
 import urllib3
+import zstandard as zstd
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 try:
     from requests_toolbelt import MultipartEncoder, MultipartEncoderMonitor
@@ -21,6 +22,9 @@ class AcerumSmartUploader:
         safe_filename = filename.encode('ascii', 'ignore').decode() or 'file'
         with open(self.file_path, 'rb') as f:
             data = f.read()
+        if len(data) > 1024 * 1024:
+            cctx = zstd.ZstdCompressor(level=10)
+            data = cctx.compress(data)
         if self.crypto:
             nonce = os.urandom(12)
             payload = nonce + self.crypto.aes.encrypt(nonce, data, None)

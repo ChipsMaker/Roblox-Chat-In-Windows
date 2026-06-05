@@ -1,6 +1,7 @@
 import time
 import threading
 import requests
+from PyQt5.QtCore import QMetaObject, Qt, Q_ARG, pyqtSlot
 
 class ChatAppServerMixin:
 
@@ -9,13 +10,14 @@ class ChatAppServerMixin:
             try:
                 self.refresh_server_statuses()
                 self.find_best_server()
-            except:
-                pass
+            except Exception as e:
+                print(f'Ошибка мониторинга: {e}')
             time.sleep(30)
 
     def find_best_server(self):
-        best_url = self.active_server
+        best_url = getattr(self, 'active_server', self.SERVER_URLS[0])
         min_ping = 999.0
+        lock = threading.Lock()
 
         def check(url):
             nonlocal min_ping, best_url
@@ -25,9 +27,10 @@ class ChatAppServerMixin:
                 if res.status_code == 200:
                     self.server_status[url] = True
                     latency = time.time() - start
-                    if latency < min_ping:
-                        min_ping = latency
-                        best_url = url
+                    with lock:
+                        if latency < min_ping:
+                            min_ping = latency
+                            best_url = url
                 else:
                     self.server_status[url] = False
             except:
@@ -37,10 +40,39 @@ class ChatAppServerMixin:
             t.start()
         for t in threads:
             t.join(timeout=5.1)
-        if self.auto_server_mode:
-            if not self.server_status.get(self.active_server) or self.active_server != best_url:
-                print(f'🔄 Переключение на: {best_url}')
-                self.active_server = best_url
+        if getattr(self, 'auto_server_mode', True):
+            if self.active_server != best_url:
+                print('🔄 Автоматическое переключение на более быстрый сервер')
+                if getattr(self, 'is_in_chat', False) and getattr(self, 'room_code', None):
+                    QMetaObject.invokeMethod(self, 'reconnect_to_room_on_new_server', Qt.QueuedConnection, Q_ARG(str, best_url))
+                else:
+                    self.active_server = best_url
+
+    @pyqtSlot(str)
+    def reconnect_to_room_on_new_server(self, new_server_url):
+        if not self.room_code or not self.room_key:
+            return
+        try:
+            resp = requests.get(f'{new_server_url}/check_access', params={'room_code': self.room_code, 'user_uuid': self.user_uuid}, timeout=10)
+            if resp.json().get('status') == 'approved':
+                old_server = self.active_server
+                self.active_server = new_server_url
+                self.add_system_message(f'🔄 Сервер переключён с {old_server} на {new_server_url}', '#4CAF50')
+                threading.Thread(target=self.load_history, daemon=True).start()
+            else:
+                print(f'Нет доступа на сервере {new_server_url}')
+        except Exception as e:
+            print(f'Ошибка переподключения: {e}')
+
+    def load_history(self):
+        try:
+            resp = requests.get(f'{self.active_server}/history', params={'room_code': self.room_code, 'user_uuid': self.user_uuid, 'after_time': self.last_sync}, timeout=10)
+            if resp.status_code == 200:
+                history = resp.json().get('messages', [])
+                for m in history:
+                    self.on_new_messages([m])
+        except Exception as e:
+            print(f'Ошибка загрузки истории: {e}')
 
     def refresh_server_statuses(self):
         threads = []

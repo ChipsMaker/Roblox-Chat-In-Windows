@@ -8,6 +8,9 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 
 class DownloadWindow(QWidget):
+    progress_signal = pyqtSignal(int, str)
+    finished_signal = pyqtSignal(str)
+    error_signal = pyqtSignal(str)
 
     def __init__(self, download_url, new_version, current_exe):
         super().__init__()
@@ -18,7 +21,12 @@ class DownloadWindow(QWidget):
         self.is_paused = False
         self.is_stopped = False
         self.oldPos = QPoint()
+        self.progress_signal.connect(self._update_ui)
+        self.finished_signal.connect(self._finalize)
+        self.error_signal.connect(self._show_error)
         self.init_ui()
+        self.show()
+        threading.Thread(target=self._download_thread, daemon=True).start()
 
     def init_ui(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -52,8 +60,6 @@ class DownloadWindow(QWidget):
         self.pbar = QProgressBar()
         self.pbar.setStyleSheet('\n            QProgressBar { background: rgba(255,255,255,10); border-radius: 5px; text-align: center; color: transparent; height: 12px; }\n            QProgressBar::chunk { background: #E2D189; border-radius: 5px; }\n        ')
         layout.addWidget(self.pbar)
-        self.show()
-        threading.Thread(target=self.start_download, daemon=True).start()
 
     def format_speed(self, bytes_per_sec):
         if bytes_per_sec < 1024:
@@ -79,14 +85,15 @@ class DownloadWindow(QWidget):
             except:
                 pass
 
-    def start_download(self):
+    def _download_thread(self):
         try:
             r = requests.get(self.download_url, stream=True, timeout=10)
+            r.raise_for_status()
             total = int(r.headers.get('content-length', 0))
+            done = 0
+            last_done = 0
+            start_time = time.time()
             with open(self.new_exe, 'wb') as f:
-                done = 0
-                start_time = time.time()
-                last_done = 0
                 for chunk in r.iter_content(chunk_size=8192):
                     if self.is_stopped:
                         return
@@ -98,32 +105,117 @@ class DownloadWindow(QWidget):
                         f.write(chunk)
                         done += len(chunk)
                         now = time.time()
-                        if now - start_time >= 1.0:
+                        if now - start_time >= 0.5:
                             speed = (done - last_done) / (now - start_time)
-                            self.lbl.setText(f'Скорость: {self.format_speed(speed)} | Осталось: {(total - done) // 1024} KB')
+                            percent = int(done / total * 100) if total > 0 else 0
+                            status = f'Скорость: {self.format_speed(speed)} | Осталось: {(total - done) // 1024} KB' if total > 0 else f'Загружено: {done // 1024} KB'
+                            self.progress_signal.emit(percent, status)
                             last_done = done
                             start_time = now
-                        self.pbar.setValue(int(done / total * 100))
             if not self.is_stopped:
-                self.finalize_update(self.new_exe)
+                self.finished_signal.emit(self.new_exe)
         except Exception as e:
             if not self.is_stopped:
-                self.lbl.setText(f'Ошибка: {str(e)[:30]}')
+                self.error_signal.emit(str(e))
 
-    def finalize_update(self, new_exe):
-        bat_path = 'updater.bat'
-        current_pid = os.getpid()
-        with open(bat_path, 'w', encoding='cp866') as f:
-            f.write(f'@echo off\n')
-            f.write(f'taskkill /f /pid {current_pid} >nul 2>&1\n')
-            f.write(f':loop\n')
-            f.write(f'timeout /t 1 /nobreak > nul\n')
-            f.write(f'del /f /q "{self.current_exe}"\n')
-            f.write(f'if exist "{self.current_exe}" goto loop\n')
-            f.write(f'move /y "{new_exe}" "{self.current_exe}"\n')
-            f.write(f'start "" "{self.current_exe}"\n')
-            f.write(f'del "%~f0"\n')
-        subprocess.Popen([bat_path], shell=True)
+    @pyqtSlot(int, str)
+    def _update_ui(self, percent, status_text):
+        self.pbar.setValue(percent)
+        self.lbl.setText(status_text)
+
+    @pyqtSlot(str)
+    def _show_error(self, err):
+        self.lbl.setText(f'Ошибка: {err[:40]}')
+        self.pbar.setValue(0)
+
+    @pyqtSlot(str)
+    def _finalize(self, new_exe):
+        import tempfile, shutil, traceback, glob
+        log_file = os.path.join(tempfile.gettempdir(), 'updater_debug.log')
+
+        def log(msg):
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f'{time.time()} - {msg}\n')
+        log('=== _finalize START ===')
+        self.lbl.setText('Перезапуск приложения...')
+        self.pause_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
+        QApplication.processEvents()
+        current = os.path.abspath(self.current_exe)
+        new = os.path.abspath(new_exe)
+        old = current + '.old'
+        log(f'current={current}, new={new}, old={old}')
+        try:
+            if os.path.exists(old):
+                os.remove(old)
+                log('Removed old')
+            os.rename(current, old)
+            log('rename current->old OK')
+        except Exception as e:
+            log(f'rename error: {e}')
+            try:
+                shutil.move(current, old)
+                log('move current->old OK')
+            except Exception as e2:
+                log(f'move error: {e2}')
+                self._show_error(f'Не удалось переименовать: {e}')
+                return
+        try:
+            os.rename(new, current)
+            log('rename new->current OK')
+        except Exception as e:
+            log(f'rename new error: {e}')
+            try:
+                shutil.move(new, current)
+                log('move new->current OK')
+            except Exception as e2:
+                log(f'move new error: {e2}')
+                try:
+                    os.rename(old, current)
+                    log('rollback OK')
+                except Exception as rb:
+                    log(f'rollback error: {rb}')
+                self._show_error(f'Не удалось переместить файл: {e}')
+                return
+        log('Files renamed successfully')
+        temp_dir = tempfile.gettempdir()
+        log(f'Cleaning old _MEI* folders in {temp_dir}')
+        for folder in glob.glob(os.path.join(temp_dir, '_MEI*')):
+            try:
+                shutil.rmtree(folder, ignore_errors=True)
+                log(f'Removed old temp folder: {folder}')
+            except Exception as e:
+                log(f'Failed to remove {folder}: {e}')
+        clean_env = {}
+        allowed_keys = ['PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'COMSPEC', 'WINDIR', 'ProgramFiles', 'ProgramFiles(x86)', 'CommonProgramFiles', 'HOMEDRIVE', 'HOMEPATH', 'OS', 'PROCESSOR_ARCHITECTURE']
+        for key in allowed_keys:
+            if key in os.environ:
+                clean_env[key] = os.environ[key]
+        for key in list(clean_env.keys()):
+            if key.startswith('_PYI_') or key.startswith('PYTHON'):
+                del clean_env[key]
+        log(f'Clean environment created with keys: {list(clean_env.keys())}')
+        bat_path = os.path.join(temp_dir, 'run_update.bat')
+        try:
+            with open(bat_path, 'w', encoding='utf-8') as f:
+                f.write(f'@echo off\n        timeout /t 2 /nobreak > nul\n        start "" "{current}"\n        timeout /t 3 /nobreak > nul\n        del "{old}" 2> nul\n        del "%~f0"\n        ')
+            log(f'Bat script written to {bat_path}')
+        except Exception as e:
+            log(f'Failed to write bat script: {e}')
+            self._show_error(f'Не удалось создать bat-скрипт: {e}')
+            return
+        log('Launching bat script with clean environment')
+        try:
+            proc = subprocess.Popen(['cmd.exe', '/c', bat_path], env=clean_env, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+            log(f'Bat script launched, PID={proc.pid}')
+            time.sleep(1.5)
+        except Exception as e:
+            log(f'Exception launching bat: {e}')
+            log(traceback.format_exc())
+            self._show_error(f'Не удалось запустить скрипт: {e}')
+            return
+        log('Exiting old app')
+        QApplication.quit()
         os._exit(0)
 
     def mousePressEvent(self, event):

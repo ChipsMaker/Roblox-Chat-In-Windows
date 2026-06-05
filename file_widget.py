@@ -2,6 +2,8 @@ import os, threading, requests, time, subprocess, traceback, re
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
+import zstandard as zstd
+from PIL import Image, ImageQt
 from .ASMI_checker import is_malware
 from .Acerum import AcerumSmartDownloader
 
@@ -82,10 +84,9 @@ class FileWidget(QFrame):
         self.icon_lbl = QLabel()
         self.icon_lbl.setFixedSize(48, 48)
         self.icon_lbl.setAlignment(Qt.AlignCenter)
-        self.icon_lbl.setStyleSheet('\n            background: #3a3a3a;\n            border-radius: 10px;\n            font-size: 30px;\n        ')
-        ext = self.file_name.split('.')[-1].lower()
-        icon_map = {'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'bmp': '🖼️', 'mp4': '🎬', 'mkv': '🎬', 'avi': '🎬', 'mp3': '🎵', 'wav': '🎵', 'ogg': '🎵', 'pdf': '📑'}
-        self.icon_lbl.setText(icon_map.get(ext, '🔗'))
+        self._set_default_icon()
+        self.icon_lbl.mousePressEvent = lambda event: self.on_open_clicked()
+        self.icon_lbl.setCursor(Qt.PointingHandCursor)
         top_layout.addWidget(self.icon_lbl)
         info_layout = QVBoxLayout()
         info_layout.setSpacing(3)
@@ -137,6 +138,30 @@ class FileWidget(QFrame):
         self.download_progress.connect(self._on_download_progress)
         self.download_complete.connect(self._on_download_complete)
 
+    def _update_thumbnail(self):
+        download_dir = self.get_download_dir()
+        local_path = os.path.join(download_dir, self.file_name)
+        ext = self.file_name.split('.')[-1].lower()
+        if ext in ('jpg', 'jpeg', 'png', 'gif', 'bmp') and os.path.exists(local_path):
+            try:
+                img = Image.open(local_path)
+                img.thumbnail((48, 48), Image.LANCZOS)
+                pixmap = ImageQt.toqpixmap(img)
+                self.icon_lbl.setPixmap(pixmap)
+                self.icon_lbl.setStyleSheet('background: transparent; border-radius: 10px;')
+                self.icon_lbl.setText('')
+                return
+            except Exception as e:
+                print(f'Ошибка создания миниатюры: {e}')
+        self._set_default_icon()
+
+    def _set_default_icon(self):
+        self.icon_lbl.setPixmap(QPixmap())
+        ext = self.file_name.split('.')[-1].lower()
+        icon_map = {'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'bmp': '🖼️', 'mp4': '🎬', 'mkv': '🎬', 'avi': '🎬', 'mp3': '🎵', 'wav': '🎵', 'ogg': '🎵', 'pdf': '📑'}
+        self.icon_lbl.setText(icon_map.get(ext, '🔗'))
+        self.icon_lbl.setStyleSheet('background: #3a3a3a; border-radius: 10px; font-size: 30px;')
+
     def update_ui_state(self):
         download_dir = self.get_download_dir()
         local_path = os.path.join(download_dir, self.file_name)
@@ -184,9 +209,11 @@ class FileWidget(QFrame):
         local_path = os.path.join(download_dir, self.file_name)
         if os.path.exists(local_path):
             self.status_lbl.setText(f'Уже загружен: {human_readable_size(os.path.getsize(local_path))}')
+            self._update_thumbnail()
             self.start_scan()
         else:
             self.status_lbl.setText('Размер: неизвестен')
+            self._update_thumbnail()
         self.update_ui_state()
 
     def open_file(self):
@@ -255,6 +282,11 @@ class FileWidget(QFrame):
                 ciphertext = encrypted_data[12:]
                 print(f'[Download] Расшифровка...')
                 decrypted = self.crypto.aes.decrypt(nonce, ciphertext, None)
+                try:
+                    dctx = zstd.ZstdDecompressor()
+                    decrypted = dctx.decompress(decrypted)
+                except zstd.ZstdError:
+                    pass
                 with open(output_path, 'wb') as f:
                     f.write(decrypted)
                 print(f'[Download] Файл сохранён: {output_path}, размер {len(decrypted)} байт')
@@ -282,6 +314,7 @@ class FileWidget(QFrame):
     def _on_download_complete(self, size):
         self.progress_bar.setVisible(False)
         self.status_lbl.setText(f'Загружен: {human_readable_size(size)}')
+        self._update_thumbnail()
         self.start_scan()
         self.update_ui_state()
 

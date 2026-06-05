@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QFrame, QVBoxLayout, QLabel, QProgressBar, QHBoxLayout, QPushButton, QApplication
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 
 class UploadTaskWidget(QFrame):
 
@@ -14,6 +14,8 @@ class UploadTaskWidget(QFrame):
         self.setStyleSheet('background: rgba(30,30,30,200); border-radius:8px; padding:8px;')
         self.init_ui()
         self.set_pending()
+        self.progress_signal.connect(self._safe_set_progress)
+        self.error_signal.connect(self._safe_set_error)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -66,24 +68,22 @@ class UploadTaskWidget(QFrame):
         self.name_lbl.update()
 
     def set_error(self, msg):
-        self.progress_bar.setVisible(False)
+        self.error_signal.emit(msg)
+
+    def _safe_set_error(self, msg):
         self.status_lbl.setText(msg)
         self.name_lbl.setStyleSheet('color:#ff5c5c; font-weight:bold; font-size:11px;')
-        self.progress_bar.update()
-        self.status_lbl.update()
-        self.name_lbl.update()
-        self.update()
 
     def set_progress(self, percent, speed=None):
+        self.progress_signal.emit(percent, speed)
+
+    def _safe_set_progress(self, percent, speed=None):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(percent)
         if speed is not None:
             self.status_lbl.setText(f'Загрузка: {percent}% — {self._format_speed(speed)}')
         else:
             self.status_lbl.setText(f'Загрузка: {percent}%')
-        self.progress_bar.update()
-        self.status_lbl.update()
-        QApplication.processEvents()
 
     @staticmethod
     def _format_speed(bytes_per_sec):

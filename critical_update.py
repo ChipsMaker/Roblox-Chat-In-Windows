@@ -1,6 +1,7 @@
 import requests
 import re
 from .config import VERSION, GITHUB_REPO
+from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
 
 def check_critical_update():
     try:
@@ -23,4 +24,5 @@ def check_critical_update():
             return (True, latest_ver, download_url)
         return (False, None, None)
     except Exception:
+        QMetaObject.invokeMethod(self, 'add_system_message', Qt.QueuedConnection, Q_ARG(str, 'Ошибка проверки обновлений...'), Q_ARG(str, '#ff5c5c'))
         return (False, None, None)
